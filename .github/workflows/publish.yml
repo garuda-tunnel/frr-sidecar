@@ -1,0 +1,17 @@
+name: Publish frr-sidecar image and chart
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  publish:
+    uses: garuda-tunnel/.github/.github/workflows/publish-component.yml@main
+    with:
+      image_name: ghcr.io/garuda-tunnel/garuda-frr-sidecar
+      image_context: image
+      chart_path: charts/frr-sidecar
+    secrets: inherit

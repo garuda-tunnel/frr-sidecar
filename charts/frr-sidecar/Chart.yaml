@@ -1,0 +1,10 @@
+apiVersion: v2
+name: frr-sidecar
+description: |
+  Shared FRR sidecar container template for k3s workloads.
+  Owns OSPF config rendering and the PBR/transit env contract
+  (single source of PBR_TRANSIT_TAG=201; the docker-era ospf_injector
+  config.py is removed — this chart is now the canonical SSOT).
+type: library
+version: 0.1.0
+appVersion: "0.1.0"

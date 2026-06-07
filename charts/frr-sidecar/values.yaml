@@ -1,0 +1,4 @@
+# Library chart has no top-level values. Consumers pass a dict to the
+# named templates explicitly:
+#   include "frr-sidecar.container" (dict "image" ... "ospf" ... "transit" ...)
+{}

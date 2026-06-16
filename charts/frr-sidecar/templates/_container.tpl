@@ -12,7 +12,7 @@ The template is a no-op when `.ospf` is nil. Callers MUST include
 unconditionally (no caller-side {{- if .Values.ospf }} wrapper).
 
 Required dict keys:
-    image:   container image reference (string; empty/omitted ⇒ frr-sidecar.defaultImage)
+    image:   container image reference (string; empty/omitted ⇒ frr-sidecar.defaultImage tag)
     ospf:    dict consumed by frr-sidecar.frrConf
     transit: dict with `interfaces: [string]` (optional)
 
@@ -31,7 +31,7 @@ fail `cap_set_proc` on startup.
 {{- end -}}
 {{- if .ospf -}}
 - name: frr-sidecar
-  image: {{ (.image | trim) | default (include "frr-sidecar.defaultImage" . | trim) | quote }}
+  image: {{ (default "" .image | trim) | default (include "frr-sidecar.defaultImage" . | trim) | quote }}
   imagePullPolicy: IfNotPresent
   {{- with .transit }}
   {{- if .interfaces }}

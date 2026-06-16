@@ -1,11 +1,12 @@
 {{/*
 frr-sidecar default container image.
 
-The image reference on the line below is rewritten by the publish-component CI
-on each image build (the CI keys off the marker comment that trails the image
-reference). Do not edit the digest by hand and keep that trailing marker comment
-in place, unchanged.
+The tag on the line below is the frr-sidecar chart version and is bumped by
+release-please (extra-files generic updater, keyed off the inline annotation
+comment). Do not edit the tag by hand, and DO NOT split the image line: the
+semver tag and its trailing annotation comment MUST remain on one line, or the
+updater will silently stop bumping the tag.
 */}}
 {{- define "frr-sidecar.defaultImage" -}}
-ghcr.io/garuda-tunnel/garuda-frr-sidecar@sha256:8829a5892ba979187a763ab9e54adf6e42e7a11ea3ca5986e11d2d5793d1404f {{/* frr-image-pin */}}
+ghcr.io/garuda-tunnel/garuda-frr-sidecar:0.1.0 {{/* x-release-please-version */}}
 {{- end -}}

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "garuda-frr"
+version = "0.0.0"   # release-please owns chart version; package version stays 0.0.0
+requires-python = ">=3.10"
+description = "Python CLI tools for the garuda-tunnel frr-sidecar container image."
+dependencies = [
+    "click>=8.1",
+    "flask>=3.0",
+    "waitress>=3.0",
+    "pyroute2>=0.7.12",
+]
+
+[project.scripts]
+garuda-frr-entrypoint = "garuda_frr.entrypoint:main"
+garuda-frr-render = "garuda_frr.render:cli"
+garuda-vty-bridge = "garuda_frr.vty_bridge:cli"
+garuda-transit-watcher = "garuda_frr.transit_watcher:cli"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["garuda_frr"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP", "RUF"]
+ignore = ["E501"]   # line length handled by black
+
+[tool.pytest.ini_options]
+testpaths = ["../tests/pyunit"]
+pythonpath = ["src"]
+python_files = "test_*.py"
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

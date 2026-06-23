@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Transit route watcher: polls OSPF LSDB and reconciles kernel PBR routes.
 
 Runs as a background process inside the FRR sidecar container. Discovers
@@ -19,10 +18,10 @@ import subprocess
 import sys
 import time
 
-# vtysh_client is a sibling file in /usr/lib/frr/ (same directory as this
-# script); Python's default sys.path[0] resolution picks it up.
-from garuda_utils import csv_split
-from vtysh_client import VtyshError, vtysh_json
+import click
+
+from garuda_frr.utils import csv_split
+from garuda_frr.vtysh_client import VtyshError, vtysh_json
 
 logging.basicConfig(
     level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
@@ -211,7 +210,11 @@ def _rule_matches(rule: object, iface: str, table: int) -> bool:
     action = rule.get("action")  # type: ignore[union-attr]
     # pyroute2 returns action as integer (1 = FR_ACT_TO_TBL) or string
     action_match = action in (_FR_ACT_TO_TBL, "FR_ACT_TO_TBL")
-    return action_match and attrs.get("FRA_IIFNAME") == iface and attrs.get("FRA_TABLE") == table
+    return (
+        action_match
+        and attrs.get("FRA_IIFNAME") == iface
+        and attrs.get("FRA_TABLE") == table
+    )
 
 
 def reconcile_rules(
@@ -293,9 +296,13 @@ def main() -> None:
                         # route (most accurate), then ASBR routes reached
                         # over the backbone (last resort).
                         ospf_route_db = vtysh_json("show ip ospf route json")
-                        desired = resolve_default_nexthops_from_ospf_routes(ospf_route_db)
+                        desired = resolve_default_nexthops_from_ospf_routes(
+                            ospf_route_db
+                        )
                         if not desired:
-                            desired = resolve_nexthops_from_ospf_routes(providers, ospf_route_db)
+                            desired = resolve_nexthops_from_ospf_routes(
+                                providers, ospf_route_db
+                            )
                     desired = sorted(set(desired))
                 else:
                     desired = []
@@ -317,6 +324,17 @@ def main() -> None:
                 log.error("unexpected error in poll cycle: %s", exc, exc_info=True)
 
             time.sleep(interval)
+
+
+@click.command()
+def cli() -> None:
+    """garuda-transit-watcher: poll OSPF LSDB and reconcile kernel PBR routes.
+
+    Configuration via environment variables: PBR_TRANSIT_TAG (required),
+    PBR_TABLE (optional, default 201), POLL_INTERVAL (optional, default 5),
+    PBR_TRANSIT_INTERFACES (optional, CSV of interface names).
+    """
+    main()
 
 
 if __name__ == "__main__":

@@ -58,9 +58,11 @@ import logging
 import subprocess
 import threading
 
+import click
 from flask import Flask, Response, jsonify, request
-from vtysh_client import vtysh_run
 from waitress import serve
+
+from garuda_frr.vtysh_client import vtysh_run
 
 # ---------------------------------------------------------------------------
 # Main server (loopback — for sister container vtysh access)
@@ -161,6 +163,32 @@ def main() -> None:
     t.start()
     logger.info("main bridge listening on %s:%d", _BIND, _PORT)
     serve(app, host=_BIND, port=_PORT, threads=_THREADS)
+
+
+@click.command()
+@click.option(
+    "--host",
+    default=_BIND,
+    show_default=True,
+    help="Bind address for the vtysh bridge.",
+)
+@click.option(
+    "--port",
+    default=_PORT,
+    show_default=True,
+    type=int,
+    help="Port for the vtysh bridge.",
+)
+def cli(host: str, port: int) -> None:
+    """garuda-vty-bridge: HTTP bridge exposing vtysh to sister containers."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s vty_bridge %(message)s",
+    )
+    t = threading.Thread(target=_serve_readyz, daemon=True, name="readyz-server")
+    t.start()
+    logger.info("main bridge listening on %s:%d", host, port)
+    serve(app, host=host, port=port, threads=_THREADS)
 
 
 if __name__ == "__main__":

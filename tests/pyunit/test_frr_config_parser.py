@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _frr_config_parser import (  # noqa: E402
+from _frr_config_parser import (
     has_interface,
     iface_block,
     iface_is_active,
@@ -22,7 +22,6 @@ from _frr_config_parser import (  # noqa: E402
     route_map_block,
     router_ospf_block,
 )
-
 
 _SAMPLE = """\
 frr defaults traditional

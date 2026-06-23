@@ -1,4 +1,10 @@
 # Library chart has no top-level values. Consumers pass a dict to the
 # named templates explicitly:
 #   include "frr-sidecar.container" (dict "image" ... "ospf" ... "transit" ...)
+#
+# injected (bool, default false):
+#   Pass injected=true only when a MAP (Kyverno MutatingPolicy) has injected
+#   the garuda-profile and garuda-intent volumes into the pod spec. When false
+#   (default, legacy mode) those volumeMounts are omitted; only frr-source is
+#   mounted. Phase 3+ MAP-aware consumers set this flag explicitly.
 {}

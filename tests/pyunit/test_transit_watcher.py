@@ -1,10 +1,16 @@
-"""Tests for transit_watcher.py: LSDB parsing, neighbor resolution, reconcile."""
+"""Tests for garuda_frr.transit_watcher: LSDB parsing, neighbor resolution, reconcile."""
 
-import json
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
-import pytest
-
+from garuda_frr.transit_watcher import (
+    find_transit_providers,
+    get_installed_nexthops,
+    reconcile_route,
+    reconcile_rules,
+    resolve_default_nexthops_from_ospf_routes,
+    resolve_nexthops,
+    resolve_nexthops_from_ospf_routes,
+)
 
 # ---------------------------------------------------------------------------
 # LSDB parsing
@@ -90,32 +96,22 @@ class TestFindTransitProviders:
     """find_transit_providers extracts advertising routers by tag."""
 
     def test_single_match(self) -> None:
-        from transit_watcher import find_transit_providers
-
         result = find_transit_providers(EXTERNAL_DB_ONE_MATCH, tag=100)
         assert result == ["10.130.30.99"]
 
     def test_two_matches(self) -> None:
-        from transit_watcher import find_transit_providers
-
         result = find_transit_providers(EXTERNAL_DB_TWO_MATCHES, tag=100)
         assert sorted(result) == ["10.130.30.50", "10.130.30.99"]
 
     def test_no_match(self) -> None:
-        from transit_watcher import find_transit_providers
-
         result = find_transit_providers(EXTERNAL_DB_NO_MATCH, tag=100)
         assert result == []
 
     def test_mixed_tags(self) -> None:
-        from transit_watcher import find_transit_providers
-
         result = find_transit_providers(EXTERNAL_DB_MIXED, tag=100)
         assert result == ["10.130.30.99"]
 
     def test_empty_db(self) -> None:
-        from transit_watcher import find_transit_providers
-
         result = find_transit_providers(EXTERNAL_DB_EMPTY, tag=100)
         assert result == []
 
@@ -124,26 +120,18 @@ class TestResolveNexthops:
     """resolve_nexthops maps advertising routers to backbone IPs."""
 
     def test_single_router(self) -> None:
-        from transit_watcher import resolve_nexthops
-
         result = resolve_nexthops(["10.130.30.99"], NEIGHBOR_DB)
         assert result == ["172.30.0.100"]
 
     def test_two_routers(self) -> None:
-        from transit_watcher import resolve_nexthops
-
         result = resolve_nexthops(["10.130.30.99", "10.130.30.50"], NEIGHBOR_DB)
         assert sorted(result) == ["172.30.0.100", "172.30.0.200"]
 
     def test_unknown_router_skipped(self) -> None:
-        from transit_watcher import resolve_nexthops
-
         result = resolve_nexthops(["10.130.30.99", "10.99.99.99"], NEIGHBOR_DB)
         assert result == ["172.30.0.100"]
 
     def test_all_unknown(self) -> None:
-        from transit_watcher import resolve_nexthops
-
         result = resolve_nexthops(["10.99.99.99"], NEIGHBOR_DB)
         assert result == []
 
@@ -156,8 +144,6 @@ class TestResolveNexthops:
         router in a different L1 segment. OSPF neighbor adjacency is L1-only,
         so absent-from-neighbor-DB == non-adjacent.
         """
-        from transit_watcher import resolve_nexthops
-
         neighbor_db = {
             "neighbors": {
                 "10.130.30.20": [
@@ -170,17 +156,15 @@ class TestResolveNexthops:
         advertised = ["10.130.30.20", "10.130.30.99"]
         result = resolve_nexthops(advertised, neighbor_db)
 
-        assert result == ["10.9.20.1"], (
-            "non-adjacent advertising router must be silently dropped"
-        )
+        assert result == [
+            "10.9.20.1"
+        ], "non-adjacent advertising router must be silently dropped"
 
 
 class TestReconcileRoute:
     """reconcile_route compares desired vs installed and calls pyroute2."""
 
     def test_desired_equals_installed_noop(self) -> None:
-        from transit_watcher import reconcile_route
-
         ipr = MagicMock()
         reconcile_route(
             ipr, desired=["172.30.0.100"], installed=["172.30.0.100"], table=201
@@ -188,8 +172,6 @@ class TestReconcileRoute:
         ipr.route.assert_not_called()
 
     def test_desired_differs_from_installed_replaces(self) -> None:
-        from transit_watcher import reconcile_route
-
         ipr = MagicMock()
         reconcile_route(
             ipr, desired=["172.30.0.100"], installed=["172.30.0.200"], table=201
@@ -199,22 +181,16 @@ class TestReconcileRoute:
         assert args[0][0] == "replace"
 
     def test_desired_empty_installed_non_empty_noop(self) -> None:
-        from transit_watcher import reconcile_route
-
         ipr = MagicMock()
         reconcile_route(ipr, desired=[], installed=["172.30.0.100"], table=201)
         ipr.route.assert_not_called()
 
     def test_desired_non_empty_installed_empty_replaces(self) -> None:
-        from transit_watcher import reconcile_route
-
         ipr = MagicMock()
         reconcile_route(ipr, desired=["172.30.0.100"], installed=[], table=201)
         ipr.route.assert_called_once()
 
     def test_single_nexthop_uses_gateway(self) -> None:
-        from transit_watcher import reconcile_route
-
         ipr = MagicMock()
         reconcile_route(ipr, desired=["172.30.0.100"], installed=[], table=201)
         kwargs = ipr.route.call_args[1]
@@ -223,8 +199,6 @@ class TestReconcileRoute:
         assert "multipath" not in kwargs
 
     def test_multiple_nexthops_uses_multipath(self) -> None:
-        from transit_watcher import reconcile_route
-
         ipr = MagicMock()
         reconcile_route(
             ipr,
@@ -243,8 +217,6 @@ class TestReconcileRules:
 
     def test_rule_added_when_nexthop_present_and_no_rule_yet(self) -> None:
         """ip rule added for interface when nexthop is present and rule is absent."""
-        from transit_watcher import reconcile_rules
-
         ipr = MagicMock()
         ipr.get_rules.return_value = []
         reconcile_rules(ipr, interfaces=["wg-firezone"], table=201, has_nexthop=True)
@@ -254,8 +226,6 @@ class TestReconcileRules:
 
     def test_rule_not_added_when_no_nexthop(self) -> None:
         """ip rule not added when has_nexthop is False, even if no rule exists."""
-        from transit_watcher import reconcile_rules
-
         ipr = MagicMock()
         ipr.get_rules.return_value = []
         reconcile_rules(ipr, interfaces=["wg-firezone"], table=201, has_nexthop=False)
@@ -263,8 +233,6 @@ class TestReconcileRules:
 
     def test_rule_removed_when_nexthop_gone(self) -> None:
         """ip rule deleted when has_nexthop is False and rule exists."""
-        from transit_watcher import reconcile_rules
-
         rule = MagicMock()
         rule.get.side_effect = lambda k, d=None: {
             "attrs": [("FRA_IIFNAME", "wg-firezone"), ("FRA_TABLE", 201)],
@@ -279,8 +247,6 @@ class TestReconcileRules:
 
     def test_noop_when_rule_present_and_nexthop_present(self) -> None:
         """No rule changes when rule already installed and nexthop is present."""
-        from transit_watcher import reconcile_rules
-
         rule = MagicMock()
         rule.get.side_effect = lambda k, d=None: {
             "attrs": [("FRA_IIFNAME", "wg-firezone"), ("FRA_TABLE", 201)],
@@ -293,8 +259,6 @@ class TestReconcileRules:
 
     def test_noop_when_rule_present_with_numeric_action(self) -> None:
         """No rule changes when rule has numeric action=1 (pyroute2 real format)."""
-        from transit_watcher import reconcile_rules
-
         rule = MagicMock()
         rule.get.side_effect = lambda k, d=None: {
             "attrs": [("FRA_IIFNAME", "wg-firezone"), ("FRA_TABLE", 201)],
@@ -307,8 +271,6 @@ class TestReconcileRules:
 
     def test_multiple_interfaces(self) -> None:
         """ip rule added for each interface when nexthop present."""
-        from transit_watcher import reconcile_rules
-
         ipr = MagicMock()
         ipr.get_rules.return_value = []
         reconcile_rules(
@@ -341,16 +303,12 @@ class TestGetInstalledNexthops:
         return route
 
     def test_single_gateway_route(self) -> None:
-        from transit_watcher import get_installed_nexthops
-
         ipr = MagicMock()
         ipr.get_routes.return_value = [self._make_route(gateway="172.30.0.100")]
         result = get_installed_nexthops(ipr, table=201)
         assert result == ["172.30.0.100"]
 
     def test_multipath_route(self) -> None:
-        from transit_watcher import get_installed_nexthops
-
         mp_entries = [
             {"gateway": "172.30.0.100", "attrs": []},
             {"gateway": "172.30.0.200", "attrs": []},
@@ -361,16 +319,12 @@ class TestGetInstalledNexthops:
         assert sorted(result) == ["172.30.0.100", "172.30.0.200"]
 
     def test_empty_table(self) -> None:
-        from transit_watcher import get_installed_nexthops
-
         ipr = MagicMock()
         ipr.get_routes.return_value = []
         result = get_installed_nexthops(ipr, table=201)
         assert result == []
 
     def test_returns_sorted(self) -> None:
-        from transit_watcher import get_installed_nexthops
-
         mp_entries = [
             {"gateway": "172.30.0.200", "attrs": []},
             {"gateway": "172.30.0.100", "attrs": []},
@@ -427,8 +381,6 @@ class TestResolveNexthopsFromOspfRoutes:
     """resolve_nexthops_from_ospf_routes maps ASBR router routes to next-hops."""
 
     def test_resolves_non_adjacent_provider_router_ids_via_ospf_routes(self) -> None:
-        from transit_watcher import resolve_nexthops_from_ospf_routes
-
         result = resolve_nexthops_from_ospf_routes(
             ["10.130.30.23", "10.130.30.33"], OSPF_ROUTE_DB_BACKBONE_ASBRS
         )
@@ -436,8 +388,6 @@ class TestResolveNexthopsFromOspfRoutes:
         assert sorted(result) == ["192.0.2.4", "192.0.2.5"]
 
     def test_skips_provider_routes_not_reached_over_backbone(self) -> None:
-        from transit_watcher import resolve_nexthops_from_ospf_routes
-
         result = resolve_nexthops_from_ospf_routes(
             ["10.9.20.2"], OSPF_ROUTE_DB_BACKBONE_ASBRS
         )
@@ -449,17 +399,11 @@ class TestResolveDefaultNexthopsFromOspfRoutes:
     """resolve_default_nexthops_from_ospf_routes maps the selected default."""
 
     def test_resolves_selected_default_route_nexthop(self) -> None:
-        from transit_watcher import resolve_default_nexthops_from_ospf_routes
-
-        result = resolve_default_nexthops_from_ospf_routes(
-            OSPF_ROUTE_DB_BACKBONE_ASBRS
-        )
+        result = resolve_default_nexthops_from_ospf_routes(OSPF_ROUTE_DB_BACKBONE_ASBRS)
 
         assert result == ["192.0.2.2"]
 
     def test_skips_default_routes_not_reached_over_backbone(self) -> None:
-        from transit_watcher import resolve_default_nexthops_from_ospf_routes
-
         route_db = {
             "0.0.0.0/0": {
                 "nexthops": [{"ip": "10.9.20.2", "via": "wg-hub-ros"}],

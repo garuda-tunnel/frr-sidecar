@@ -17,7 +17,9 @@ class VtyshError(RuntimeError):
     """Raised when vtysh exits non-zero or its output is not parseable JSON."""
 
 
-def vtysh_run(command: str, timeout: float = _DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
+def vtysh_run(
+    command: str, timeout: float = _DEFAULT_TIMEOUT
+) -> subprocess.CompletedProcess:
     """Run a vtysh command, return the completed process verbatim.
 
     Raises OSError when vtysh cannot be executed, subprocess.TimeoutExpired
@@ -42,9 +44,12 @@ def vtysh_json(command: str, timeout: float = _DEFAULT_TIMEOUT) -> dict:
     result = vtysh_run(command, timeout=timeout)
     if result.returncode != 0:
         raise VtyshError(
-            f"vtysh returncode={result.returncode} command={command!r} " f"stderr={result.stderr!r}"
+            f"vtysh returncode={result.returncode} command={command!r} "
+            f"stderr={result.stderr!r}"
         )
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        raise VtyshError(f"vtysh returned non-JSON output for command={command!r}: {exc}") from exc
+        raise VtyshError(
+            f"vtysh returned non-JSON output for command={command!r}: {exc}"
+        ) from exc

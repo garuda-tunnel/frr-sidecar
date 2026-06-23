@@ -1,17 +1,19 @@
 FROM quay.io/frrouting/frr:10.6.0
 
-# FRR sidecar image for OSPF injector operator.
-# Configuration is delivered via base64-encoded environment variables
-# (FRR_CONF_B64, DAEMONS_B64, VTYSH_CONF_B64) instead of file bind-mounts.
+# FRR sidecar image for garuda-tunnel annotation-layer model.
+# Configuration is rendered at container startup by garuda-frr-entrypoint from:
+#   - Profile ConfigMap mount at /etc/garuda/profile/ (frr.conf.tmpl, daemons)
+#   - Intent annotations via Downward API at /etc/garuda/intent/annotations
+#   - Env vars injected by MAP (OSPF_INTERFACES, REDISTRIBUTE, OSPF_ROUTER_ID,
+#     PROFILE, PBR_TRANSIT_TAG, PBR_TRANSIT_INTERFACES).
 
-RUN apk add --no-cache python3 py3-pip \
-    && pip3 install --no-cache-dir --break-system-packages \
-       'pyroute2>=0.7.12' 'flask>=3.0' 'waitress>=3.0'
+# Install Python and pip, then install garuda-frr as a proper package.
+# --break-system-packages: this image has no virtualenv; the container IS the
+# isolation boundary. We install into the system Python intentionally.
+RUN apk add --no-cache python3 py3-pip
 
-COPY transit_watcher.py /usr/lib/frr/transit_watcher.py
-COPY vtysh_client.py /usr/lib/frr/vtysh_client.py
-COPY vty_bridge.py /usr/lib/frr/vty_bridge.py
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY src /opt/garuda-frr/src
+COPY pyproject.toml /opt/garuda-frr/pyproject.toml
+RUN pip3 install --no-cache-dir --break-system-packages /opt/garuda-frr/
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["garuda-frr-entrypoint"]

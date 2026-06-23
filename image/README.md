@@ -74,6 +74,30 @@ tagged default route; consumers run the watcher to follow that advertisement.
 - [Dynamic PBR transit watcher design](../../../../docs/superpowers/specs/2026-04-06-dynamic-pbr-transit-watcher-design.md)
 - [Smoke testing runbook](../../../../docs/operations/smoke-testing.md)
 
+## Privilege Rationale
+
+The frr-sidecar must run as root with `NET_ADMIN`, `NET_RAW`, and `SYS_ADMIN`
+capabilities. All three are genuinely required:
+
+- **NET_ADMIN**: `pyroute2` in `transit_watcher.py` programs Policy-Based Routing
+  rules (`ip rule add/del`) and kernel routes (`ip route`) in the shared pod network
+  namespace. This requires `CAP_NET_ADMIN`. FRR daemons (zebra, ospfd) also need
+  `NET_ADMIN` to install routes they learn via OSPF.
+- **NET_RAW**: FRR binds raw sockets for OSPF hello/LSA packet processing.
+  Without `CAP_NET_RAW`, `ospfd` fails to open the OSPF multicast socket.
+- **SYS_ADMIN**: The transit watcher performs IPVS / netfilter operations and
+  may call into `clone`-based APIs. Without `CAP_SYS_ADMIN`, some `pyroute2`
+  operations fail on kernel versions that enforce the capability boundary.
+
+**Mitigation**: the chart's `securityContext.capabilities` section now drops
+`ALL` capabilities first (`drop: ["ALL"]`), then adds back only the three
+listed above. This follows the principle of least privilege: capabilities not
+explicitly required are removed at the kernel level, not merely omitted.
+
+**Periodic review**: as FRR and pyroute2 versions evolve, operators should
+review whether `SYS_ADMIN` remains necessary. A future refactor of the transit
+watcher to avoid the netfilter path could remove this capability.
+
 ## Key Code Entry Points
 
 - [Transit watcher](transit_watcher.py)

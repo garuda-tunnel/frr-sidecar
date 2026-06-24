@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/garuda-tunnel/frr-sidecar-internal/compare/v0.3.1...v0.3.2) (2026-06-24)
+
+
+### Bug Fixes
+
+* restore profile daemons copy; revert /etc/frr chown ([#15](https://github.com/garuda-tunnel/frr-sidecar-internal/issues/15)) ([adac6c0](https://github.com/garuda-tunnel/frr-sidecar-internal/commit/adac6c017bc352f5dca47d15793d9fd5b561e2a2))
+
 ## [0.3.1](https://github.com/garuda-tunnel/frr-sidecar-internal/compare/v0.3.0...v0.3.1) (2026-06-24)
 
 

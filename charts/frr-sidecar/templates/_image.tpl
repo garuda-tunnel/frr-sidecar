@@ -8,5 +8,5 @@ semver tag and its trailing annotation comment MUST remain on one line, or the
 updater will silently stop bumping the tag.
 */}}
 {{- define "frr-sidecar.defaultImage" -}}
-ghcr.io/garuda-tunnel/garuda-frr-sidecar:0.3.1 {{/* x-release-please-version */}}
+ghcr.io/garuda-tunnel/garuda-frr-sidecar:0.3.2 {{/* x-release-please-version */}}
 {{- end -}}

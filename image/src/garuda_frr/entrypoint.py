@@ -82,6 +82,20 @@ def copy_vtysh_conf_if_present() -> None:
         Path("/etc/frr/vtysh.conf").write_bytes(src.read_bytes())
 
 
+def copy_daemons_if_present() -> None:
+    """Copy /etc/garuda/profile/daemons to /etc/frr/daemons if present.
+
+    Restores the step dropped when entrypoint.sh was replaced by this module.
+    Without this, /etc/frr/daemons stays the base-image default (ospfd=no) and
+    OSPF never starts regardless of capabilities.
+    """
+    profile_mount = os.environ.get("PROFILE_MOUNT", "/etc/garuda/profile")
+    src = Path(profile_mount) / "daemons"
+    if src.is_file():
+        Path("/etc/frr/daemons").write_bytes(src.read_bytes())
+        click.echo(f"frr-sidecar: copied {src} -> /etc/frr/daemons", err=True)
+
+
 class ProcessSupervisor:
     """Track child processes and shut them down in reverse spawn order on signal."""
 
@@ -144,6 +158,7 @@ def main(skip_render: bool, validate_only: bool) -> None:
     if not skip_render:
         render_and_write_frr_conf()
         copy_vtysh_conf_if_present()
+        copy_daemons_if_present()
         validate_frr_conf()
 
     if validate_only:

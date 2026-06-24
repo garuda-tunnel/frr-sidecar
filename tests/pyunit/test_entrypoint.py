@@ -11,6 +11,8 @@ Covers:
   8. ProcessSupervisor.shutdown() SIGKILLs after timeout.
   9. ProcessSupervisor.shutdown() is idempotent (second call no-op).
  10. Click CLI: garuda-frr-entrypoint --help returns 0 and prints expected help.
+ 11. copy_daemons_if_present() copies profile daemons to /etc/frr/daemons when present.
+ 12. copy_daemons_if_present() is no-op when profile daemons file is absent.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from click.testing import CliRunner
 
 from garuda_frr.entrypoint import (
     ProcessSupervisor,
+    copy_daemons_if_present,
     copy_vtysh_conf_if_present,
     get_backbone_ip,
     main,
@@ -236,3 +239,60 @@ def test_cli_help():
     assert "garuda-frr-entrypoint" in result.output
     assert "--skip-render" in result.output
     assert "--validate-only" in result.output
+
+
+# ---------------------------------------------------------------------------
+# 11. copy_daemons_if_present — copies profile daemons to /etc/frr/daemons
+# ---------------------------------------------------------------------------
+
+
+def test_copy_daemons_if_present_copies_when_present(tmp_path, monkeypatch):
+    """copy_daemons_if_present copies profile daemons to /etc/frr/daemons."""
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    src = profile_dir / "daemons"
+    src.write_text("ospfd=yes\nzebra=yes\n")
+
+    frr_dir = tmp_path / "frr"
+    frr_dir.mkdir()
+    dst = frr_dir / "daemons"
+
+    monkeypatch.setenv("PROFILE_MOUNT", str(profile_dir))
+
+    import garuda_frr.entrypoint as ep
+
+    original_path = ep.Path
+
+    def patched_path(p):
+        p = str(p)
+        if p == "/etc/frr/daemons":
+            return dst
+        return original_path(p)
+
+    with patch("garuda_frr.entrypoint.Path", side_effect=patched_path):
+        copy_daemons_if_present()
+
+    assert dst.read_text() == "ospfd=yes\nzebra=yes\n"
+
+
+# ---------------------------------------------------------------------------
+# 12. copy_daemons_if_present — no-op when profile daemons file absent
+# ---------------------------------------------------------------------------
+
+
+def test_copy_daemons_if_present_noop_when_absent(tmp_path, monkeypatch):
+    """copy_daemons_if_present does nothing when profile daemons file is absent."""
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    # No daemons file in profile_dir
+
+    frr_dir = tmp_path / "frr"
+    frr_dir.mkdir()
+    dst = frr_dir / "daemons"
+
+    monkeypatch.setenv("PROFILE_MOUNT", str(profile_dir))
+
+    copy_daemons_if_present()
+
+    # /etc/frr/daemons must NOT have been written by us
+    assert not dst.exists()

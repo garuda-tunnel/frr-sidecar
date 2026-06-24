@@ -16,11 +16,4 @@ COPY src /opt/garuda-frr/src
 COPY pyproject.toml /opt/garuda-frr/pyproject.toml
 RUN pip3 install --no-cache-dir --break-system-packages /opt/garuda-frr/
 
-# Entrypoint renders frr.conf at runtime to /etc/frr/frr.conf as root.
-# /etc/frr is frr:frr 0755 in the base image; with capabilities drop:ALL the
-# root process loses DAC_OVERRIDE and cannot write there. Make the directory
-# root-owned so root writes its own files without DAC_OVERRIDE, keeping the
-# historical minimal cap set (NET_ADMIN/NET_RAW/SYS_ADMIN). daemons stays readable.
-RUN chown root:root /etc/frr
-
 ENTRYPOINT ["garuda-frr-entrypoint"]

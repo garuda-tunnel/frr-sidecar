@@ -7,4 +7,5 @@ description: |
   config.py is removed — this chart is now the canonical SSOT).
 type: library
 version: 0.3.0
-appVersion: "0.1.0"
+appVersion: "0.3.1"
+# 0.3.1: /etc/frr chowned root:root at build time; entrypoint no longer needs DAC_OVERRIDE

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/garuda-tunnel/frr-sidecar-internal/compare/v0.3.0...v0.3.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **frr-sidecar:** bump appVersion to 0.3.1; /etc/frr chowned root:root ([011d07c](https://github.com/garuda-tunnel/frr-sidecar-internal/commit/011d07c2fd7fcc09dda8b6e7b66a15f62dea90fd))
+* **frr-sidecar:** bump appVersion to 0.3.1; /etc/frr chowned root:root ([846a0b9](https://github.com/garuda-tunnel/frr-sidecar-internal/commit/846a0b9611d09d31f880908e4dfb576cf1b16c4c))
+
 ## [0.3.0](https://github.com/garuda-tunnel/frr-sidecar-internal/compare/v0.2.0...v0.3.0) (2026-06-23)
 
 

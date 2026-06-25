@@ -6,7 +6,7 @@ description: |
   (single source of PBR_TRANSIT_TAG=201; the docker-era ospf_injector
   config.py is removed — this chart is now the canonical SSOT).
 type: library
-version: 0.3.2
+version: 0.3.3
 appVersion: "0.3.3"
 
 # 0.3.1: /etc/frr chowned root:root at build time; entrypoint no longer needs DAC_OVERRIDE

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/garuda-tunnel/frr-sidecar-internal/compare/v0.3.2...v0.3.3) (2026-06-25)
+
+
+### Bug Fixes
+
+* render prod-parity OSPF (timers, redistribute indent, passive interfaces) ([#17](https://github.com/garuda-tunnel/frr-sidecar-internal/issues/17)) ([c5bdfbc](https://github.com/garuda-tunnel/frr-sidecar-internal/commit/c5bdfbcdab0adff36f7935cbe4a6d9e1032f19d3))
+
 ## [0.3.2](https://github.com/garuda-tunnel/frr-sidecar-internal/compare/v0.3.1...v0.3.2) (2026-06-24)
 
 

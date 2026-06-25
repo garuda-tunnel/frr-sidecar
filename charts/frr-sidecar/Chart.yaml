@@ -7,7 +7,12 @@ description: |
   config.py is removed — this chart is now the canonical SSOT).
 type: library
 version: 0.3.2
-appVersion: "0.3.2"
+appVersion: "0.3.3"
 
 # 0.3.1: /etc/frr chowned root:root at build time; entrypoint no longer needs DAC_OVERRIDE
 # 0.3.2: restore profile daemons copy (ospfd) + revert /etc/frr chown
+# 0.3.3: render.py prod-parity fixes — active OSPF interfaces emit hello 5 / dead 15
+#        (D1/D2); redistribute rendered at column 0 so the template's 2-space indent
+#        lands it inside `router ospf` (D3, fixes silent drop); passive-interface
+#        support via OSPF_PASSIVE_INTERFACES env / net.garuda-tunnel/passive-interfaces
+#        annotation, rendered as area + `ip ospf passive` only (D11).

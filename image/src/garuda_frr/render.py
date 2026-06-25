@@ -4,10 +4,15 @@ Renders /etc/frr/frr.conf. Called by garuda-frr-entrypoint (which calls
 render_all_from_env()) or as a standalone CLI (garuda-frr-render).
 
 Inputs (in priority order):
-  1. Env vars injected by MAP: OSPF_INTERFACES, REDISTRIBUTE, OSPF_ROUTER_ID,
-     PROFILE, PBR_TRANSIT_TAG, PBR_TRANSIT_INTERFACES.
+  1. Env vars injected by MAP: OSPF_INTERFACES, OSPF_PASSIVE_INTERFACES,
+     REDISTRIBUTE, OSPF_ROUTER_ID, PROFILE, PBR_TRANSIT_TAG,
+     PBR_TRANSIT_INTERFACES.
   2. Intent annotation file at INTENT_MOUNT/annotations (Downward API).
-     Annotation values override env vars for the same logical field.
+     Annotation values override env vars for the same logical field. The
+     net.garuda-tunnel/passive-interfaces annotation (CSV) maps to
+     OSPF_PASSIVE_INTERFACES; those interfaces render as passive (area +
+     `ip ospf passive`, no hello/dead timers, no mtu-ignore) and are excluded
+     from the active OSPF_INTERFACES timer stanzas.
   3. Profile template at PROFILE_MOUNT/frr.conf.tmpl.
   4. Tier 2 snippet at EXTRA_MOUNT/ (appended if dir exists).
   5. Tier 3 raw override at RAW_MOUNT/ (bypasses template if dir exists AND
@@ -131,13 +136,20 @@ def parse_annotations(content: str) -> dict[str, str]:
 
 
 def render_ospf_interfaces(interfaces: list[str]) -> str:
-    """Render per-interface FRR stanzas.
+    """Render per-interface FRR stanzas for ACTIVE OSPF interfaces.
 
-    For each interface name produces:
+    For each interface name produces (prod-parity, frr-sidecar 0.2.x ground truth):
         interface <name>
           ip ospf area 0.0.0.0
+          ip ospf hello-interval 5
+          ip ospf dead-interval 15
           ip ospf mtu-ignore
         !
+
+    The hello/dead timers (5s/15s) are mandatory: the production OSPF mesh runs
+    Hello 5s / Dead 15s. Omitting them lets FRR fall back to 10s/40s, which
+    prevents adjacency formation entirely (timer mismatch -> hellos rejected).
+    See docs/artifacts/2026-06-25-vxxlcx-prod-frr-ground-truth.md (D1/D2).
     """
     if not interfaces:
         return ""
@@ -146,21 +158,75 @@ def render_ospf_interfaces(interfaces: list[str]) -> str:
         lines += [
             f"interface {iface}",
             "  ip ospf area 0.0.0.0",
+            "  ip ospf hello-interval 5",
+            "  ip ospf dead-interval 15",
             "  ip ospf mtu-ignore",
             "!",
         ]
     return "\n".join(lines)
 
 
-def render_redistribute(protocols: list[str]) -> str:
-    """Render `redistribute <proto>` lines inside a router ospf block.
+def render_passive_interfaces(interfaces: list[str]) -> str:
+    """Render per-interface FRR stanzas for PASSIVE OSPF interfaces.
 
-    Each entry is indented with two spaces (caller places this inside
-    `router ospf` block via template substitution).
+    For each interface name produces (prod-parity, frr-sidecar 0.2.x ground truth
+    — firezone wg-firezone, border dummy0):
+        interface <name>
+          ip ospf area 0.0.0.0
+          ip ospf passive
+        !
+
+    Passive interfaces participate in OSPF (their subnet is advertised) but send
+    NO hellos and form NO adjacency. Production renders them with area + passive
+    ONLY — no hello/dead timers and NO mtu-ignore (mtu-ignore is moot on a passive
+    interface and is absent in the prod ground-truth raw frr.conf). See
+    docs/artifacts/2026-06-25-vxxlcx-prod-frr-ground-truth.md §2.5/§2.6 (D11).
+    """
+    if not interfaces:
+        return ""
+    lines = []
+    for iface in interfaces:
+        lines += [
+            f"interface {iface}",
+            "  ip ospf area 0.0.0.0",
+            "  ip ospf passive",
+            "!",
+        ]
+    return "\n".join(lines)
+
+
+def render_interface_block(
+    active: list[str], passive: list[str] | None = None
+) -> str:
+    """Render the combined OSPF interface block: active stanzas then passive.
+
+    Active interfaces (with timers + mtu-ignore) are emitted first, followed by
+    passive interfaces (area + passive only). This ordering matches the prod
+    ground truth (active backbone/tunnel first, then passive wg-firezone/dummy0).
+    """
+    passive = passive or []
+    parts = []
+    active_block = render_ospf_interfaces(active)
+    if active_block:
+        parts.append(active_block)
+    passive_block = render_passive_interfaces(passive)
+    if passive_block:
+        parts.append(passive_block)
+    return "\n".join(parts)
+
+
+def render_redistribute(protocols: list[str]) -> str:
+    """Render `redistribute <proto>` lines for inside a router ospf block.
+
+    Each entry is rendered at column 0; the profile template places this block
+    via `  ${REDISTRIBUTE_BLOCK}` (2-space indent), so the directive lands as a
+    `router ospf` sub-command. Emitting 0-indent here (rather than the previous
+    2-space indent) avoids the double-indent that made ospfd silently drop the
+    directive. See docs/artifacts/2026-06-24-frr-conf-old-vs-new-diff.md (D3).
     """
     if not protocols:
         return ""
-    return "\n".join(f"  redistribute {p}" for p in protocols)
+    return "\n".join(f"redistribute {p}" for p in protocols)
 
 
 def render_default_originate(value: str) -> str:
@@ -177,21 +243,25 @@ def render_from_template(
     interfaces: list[str],
     redistribute: list[str],
     default_originate: str,
+    passive_interfaces: list[str] | None = None,
 ) -> str:
     """Substitute all garuda placeholders in the FRR config template.
 
     Placeholder tokens:
         ${ROUTER_ID}              — OSPF router-id
-        ${OSPF_INTERFACES_BLOCK}  — per-interface stanzas
+        ${OSPF_INTERFACES_BLOCK}  — per-interface stanzas (active then passive)
         ${REDISTRIBUTE_BLOCK}     — redistribute directives
         ${DEFAULT_ORIGINATE_BLOCK}— default-information originate (or empty)
+
+    The ${OSPF_INTERFACES_BLOCK} renders active interfaces (with hello/dead
+    timers + mtu-ignore) followed by passive interfaces (area + passive only).
 
     Uses string.Template.safe_substitute for single-pass substitution;
     unknown placeholders are left verbatim (not raised as errors).
     """
     return Template(template).safe_substitute(
         ROUTER_ID=router_id,
-        OSPF_INTERFACES_BLOCK=render_ospf_interfaces(interfaces),
+        OSPF_INTERFACES_BLOCK=render_interface_block(interfaces, passive_interfaces),
         REDISTRIBUTE_BLOCK=render_redistribute(redistribute),
         DEFAULT_ORIGINATE_BLOCK=render_default_originate(default_originate),
     )
@@ -280,14 +350,25 @@ def render_all_from_env() -> str:
     default_originate = annotations.get(
         "net.garuda-tunnel/default-originate"
     ) or os.environ.get("DEFAULT_ORIGINATE", "false")
+    passive_raw = annotations.get(
+        "net.garuda-tunnel/passive-interfaces"
+    ) or os.environ.get("OSPF_PASSIVE_INTERFACES", "")
 
     interfaces = csv_split(interfaces_raw)
     redistribute = csv_split(redistribute_raw)
+    passive_interfaces = csv_split(passive_raw)
+
+    # Passive interfaces are rendered as their own (area + passive) stanzas;
+    # remove them from the active set so they are not emitted twice (a passive
+    # iface listed in both net.garuda-tunnel/interfaces and /passive-interfaces
+    # would otherwise produce a duplicate interface block).
+    interfaces = [i for i in interfaces if i not in passive_interfaces]
 
     # --- Validate untrusted inputs before substitution ---
     try:
         validate_router_id(router_id)
         validate_interfaces(interfaces)
+        validate_interfaces(passive_interfaces)
         validate_redistribute(redistribute)
     except ValueError as exc:
         print(f"FATAL: {exc}", file=sys.stderr)
@@ -311,6 +392,7 @@ def render_all_from_env() -> str:
         interfaces=interfaces,
         redistribute=redistribute,
         default_originate=default_originate,
+        passive_interfaces=passive_interfaces,
     )
 
     # --- Tier 2: append extra snippet ---

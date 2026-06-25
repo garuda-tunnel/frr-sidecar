@@ -97,15 +97,53 @@ def test_render_ospf_interfaces_empty():
     assert render_frr.render_ospf_interfaces([]) == ""
 
 
+def test_render_ospf_interfaces_emits_timers_and_mtu():
+    """Active interfaces carry hello 5 / dead 15 / mtu-ignore (prod parity, D1/D2)."""
+    result = render_frr.render_ospf_interfaces(["backbone"])
+    assert "  ip ospf hello-interval 5" in result
+    assert "  ip ospf dead-interval 15" in result
+    assert "  ip ospf mtu-ignore" in result
+    assert "ip ospf passive" not in result
+
+
+def test_render_passive_interfaces():
+    """Passive interfaces carry area + passive ONLY (no timers, no mtu-ignore)."""
+    result = render_frr.render_passive_interfaces(["wg-firezone"])
+    assert "interface wg-firezone" in result
+    assert "  ip ospf area 0.0.0.0" in result
+    assert "  ip ospf passive" in result
+    assert "hello-interval" not in result
+    assert "dead-interval" not in result
+    assert "mtu-ignore" not in result
+
+
+def test_render_passive_interfaces_empty():
+    assert render_frr.render_passive_interfaces([]) == ""
+
+
+def test_render_interface_block_active_then_passive():
+    """Combined block renders active stanzas first, passive last (prod order)."""
+    result = render_frr.render_interface_block(["backbone"], ["wg-firezone"])
+    assert result.index("interface backbone") < result.index("interface wg-firezone")
+    # backbone is active (has timers); wg-firezone is passive (no timers)
+    fz = result.index("interface wg-firezone")
+    assert "hello-interval" not in result[fz:]
+
+
 # ---------------------------------------------------------------------------
 # 4. render_redistribute — redistribute stanzas
 # ---------------------------------------------------------------------------
 
 
 def test_render_redistribute_multiple():
+    """redistribute lines render at column 0 (template adds the 2-space indent)."""
     result = render_frr.render_redistribute(["connected", "kernel"])
-    assert "  redistribute connected" in result
-    assert "  redistribute kernel" in result
+    assert "redistribute connected" in result
+    assert "redistribute kernel" in result
+    # No leading indent baked in here — the profile template's `  ${REDISTRIBUTE_BLOCK}`
+    # supplies the single router-ospf sub-command indent. Double-indent (D3) dropped it.
+    assert "\n  redistribute" not in result
+    assert not result.startswith("  ")
 
 
 def test_render_redistribute_empty():
@@ -261,6 +299,63 @@ def test_main_renders_full_config(profile_dir_builder, monkeypatch, capsys):
     assert "interface backbone" in out
     assert "interface wg0" in out
     assert "redistribute connected" in out
+
+
+def test_main_passive_interface_dedup(profile_dir_builder, monkeypatch, capsys):
+    """A passive interface is rendered once (passive), not duplicated as active.
+
+    Models firezone: interfaces=backbone,wg-firezone + passive=wg-firezone.
+    wg-firezone must appear as a single passive stanza; backbone stays active.
+    """
+    dirs = profile_dir_builder(
+        template=SAMPLE_TEMPLATE,
+        annotations=(
+            'net.garuda-tunnel/router-id="10.130.30.22"\n'
+            'net.garuda-tunnel/interfaces="backbone,wg-firezone"\n'
+            'net.garuda-tunnel/passive-interfaces="wg-firezone"\n'
+            'net.garuda-tunnel/redistribute="connected,kernel"\n'
+        ),
+    )
+    env = {
+        "OSPF_INTERFACES": "",
+        "OSPF_PASSIVE_INTERFACES": "",
+        "REDISTRIBUTE": "",
+        **dirs["env"],
+    }
+    monkeypatch.setattr(os, "environ", {**os.environ, **env})
+
+    render_frr.main()
+    out = capsys.readouterr().out
+    assert out.count("interface wg-firezone") == 1
+    assert out.count("interface backbone") == 1
+    # wg-firezone passive (after its stanza, before next interface/router): passive set
+    fz = out.index("interface wg-firezone")
+    assert "ip ospf passive" in out[fz:]
+    # backbone is active: has timers
+    bb = out.index("interface backbone")
+    assert "ip ospf hello-interval 5" in out[bb:fz]
+
+
+def test_main_passive_interface_via_env(profile_dir_builder, monkeypatch, capsys):
+    """OSPF_PASSIVE_INTERFACES env var is honored when annotation is absent."""
+    dirs = profile_dir_builder(
+        template=SAMPLE_TEMPLATE,
+        annotations='net.garuda-tunnel/router-id="10.130.30.50"\n',
+    )
+    env = {
+        "OSPF_INTERFACES": "backbone,dummy0",
+        "OSPF_PASSIVE_INTERFACES": "dummy0",
+        "REDISTRIBUTE": "",
+        **dirs["env"],
+    }
+    monkeypatch.setattr(os, "environ", {**os.environ, **env})
+
+    render_frr.main()
+    out = capsys.readouterr().out
+    assert out.count("interface dummy0") == 1
+    dummy = out.index("interface dummy0")
+    assert "ip ospf passive" in out[dummy:]
+    assert "hello-interval" not in out[dummy:]
 
 
 def test_main_tier3_raw_bypasses_template(profile_dir_builder, monkeypatch, capsys):

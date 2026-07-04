@@ -1,4 +1,4 @@
-FROM quay.io/frrouting/frr:10.6.0
+FROM quay.io/frrouting/frr:10.6.1
 
 # FRR sidecar image for garuda-tunnel annotation-layer model.
 # Configuration is rendered at container startup by garuda-frr-entrypoint from:

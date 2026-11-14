@@ -1,106 +1,74 @@
-# FRR Sidecar Runtime
+# FRR sidecar runtime
 
-This directory contains the FRR sidecar image entrypoint and the transit
-watcher used by transit consumers.
+[Dockerfile](Dockerfile) installs `garuda_frr` from [src/](src/garuda_frr)
+using [pyproject.toml](pyproject.toml). Its entrypoint is
+`garuda-frr-entrypoint`. The standalone Python files directly under `image/`
+are not copied into the image.
 
-## Components
+## Startup and rendering
 
-### `transit_watcher.py`
+[entrypoint.py](src/garuda_frr/entrypoint.py) resolves the `backbone` address,
+renders `/etc/frr/frr.conf` and validates it with `vtysh -CC`. It copies
+`daemons` from the profile mount when present, then starts the HTTP bridge
+and FRR supervisor. `PBR_TRANSIT_TAG` additionally enables the transit watcher.
+Missing backbone data or invalid FRR configuration fails startup.
 
-`transit_watcher.py` is a background reconciler that runs inside transit
-consumer FRR sidecars.
+[render.py](src/garuda_frr/render.py) reads a profile template from
+`PROFILE_MOUNT/frr.conf.tmpl` (default `/etc/garuda/profile`). Non-empty intent
+annotations from `INTENT_MOUNT/annotations` (default `/etc/garuda/intent`)
+override environment values. Passive interfaces are excluded from the active
+interface list. `EXTRA_MOUNT` snippets extend the rendered configuration;
+`frr-mode=raw` requires `RAW_MOUNT/frr.conf` and bypasses template rendering.
+See the renderer's module documentation for the supported fields and paths.
 
-Problem it solves:
+SIGTERM and SIGINT terminate managed child processes in reverse spawn order
+and exit successfully. Unexpected FRR supervisor exit propagates its exit
+status after child cleanup. Readiness does not monitor every child process.
 
-- transit consumers must route marked traffic into a dedicated kernel table
-  toward the current transit provider
-- the provider next hop is not stable enough to hardcode because OSPF can
-  re-converge and move the best path to another neighbor
-- FRR itself does not own the consumer-side kernel PBR table, so a separate
-  reconciler is needed to keep Linux routing aligned with the live OSPF state
+## HTTP endpoints
 
-What it does:
+[vty_bridge.py](src/garuda_frr/vty_bridge.py) binds the command bridge to
+`127.0.0.1:7890` by default. `POST /vtysh` runs FRR commands; keep it within
+the pod network namespace. `GET /health` only checks that the bridge serves
+requests.
 
-1. polls FRR via `vtysh` for OSPF external LSAs
-2. selects only default LSAs with the configured transit tag
-3. resolves the advertising routers into backbone neighbor addresses
-4. reconciles the consumer kernel default route in the dedicated transit table
-5. adds or removes `ip rule` entries for the configured ingress interfaces
+The separate `0.0.0.0:9179/readyz` endpoint returns 200 when `vtysh show version`
+succeeds and 503 on failure. It does not require OSPF Full adjacency or prove
+that the transit watcher is healthy. Use this endpoint for kubelet readiness.
 
-The watcher is intentionally consumer-side only. It does not advertise OSPF
-state, does not own FRR configuration rendering, and does not create Docker
-networks.
+## Transit routing
 
-## Runtime Contract
+[transit_watcher.py](src/garuda_frr/transit_watcher.py) follows tagged OSPF
+default LSAs and reconciles Linux routes through `pyroute2.IPRoute`.
 
-`entrypoint.sh` starts the watcher only when `PBR_TRANSIT_TAG` is present.
+| Environment variable | Meaning | Default |
+|---|---|---|
+| `PBR_TRANSIT_TAG` | Required external LSA tag | none |
+| `PBR_TABLE` | Kernel routing table | `201` |
+| `POLL_INTERVAL` | Seconds between polls | `5` |
+| `PBR_TRANSIT_INTERFACES` | Comma-separated ingress interfaces | empty |
 
-Inputs:
+The watcher first resolves tagged advertising routers through the neighbor
+table. If providers exist but have no direct neighbor match, it tries the
+selected OSPF default route, then provider routes through `backbone`.
+That fallback can select a default next hop without checking its LSA tag.
+Without any tagged provider it does not enter that fallback.
 
-- `PBR_TRANSIT_TAG` (required) — OSPF external route tag to match
-- `PBR_TABLE` (optional, default `10000`) — kernel routing table number
-- `POLL_INTERVAL` (optional, default `5`) — poll interval in seconds
-- `PBR_TRANSIT_INTERFACES` (optional) — comma-separated ingress interfaces that
-  should gain `ip rule` entries while a transit next hop exists
+A non-empty desired next-hop set replaces a differing table default and
+installs ingress rules at priority 29000. An empty set removes the configured
+ingress rules but retains the previous table route. Poll errors are logged
+and retried, including a broad exception handler; existing routes and rules
+can therefore remain after a failed cycle. This is the current failure
+behavior, not a fail-closed guarantee.
 
-Side effects:
+## Privileges
 
-- replaces the default route in the configured kernel table when the desired
-  transit next hops change
-- installs or removes `ip rule iif <iface> lookup <table>` entries to gate
-  transit steering on next-hop availability
-- logs every reconcile decision through the standard Python logger
+The [library container template](../charts/frr-sidecar/templates/_container.tpl)
+drops all capabilities and adds `NET_ADMIN`, `NET_RAW` and `SYS_ADMIN`.
+`NET_ADMIN` supports route/rule changes and `NET_RAW` supports OSPF sockets.
+The template records FRR startup capability checks as the reason for retaining
+`SYS_ADMIN`. The watcher does not perform IPVS or netfilter operations; it is
+not evidence that `SYS_ADMIN` is needed. Validate any capability reduction
+against the selected FRR image before changing the runtime policy.
 
-Failure model:
-
-- if OSPF data is temporarily unavailable, the watcher logs and retries on the
-  next poll cycle
-- if no tagged provider is currently visible, it leaves the transit table route
-  untouched and removes interface rules when `PBR_TRANSIT_INTERFACES` is set
-- the broad `except Exception` in the main loop is deliberate for a long-lived
-  daemon: one bad poll cycle must not kill the sidecar process
-
-## Who Uses It
-
-`transit_watcher.py` is used by workloads that consume transit routing through
-FRR, for example components whose FRR sidecar renders transit consumer labels
-and needs Linux PBR state to follow live OSPF convergence.
-
-It is not used by the transit provider itself. The provider advertises the
-tagged default route; consumers run the watcher to follow that advertisement.
-
-## Relationship To Other Docs
-
-- [Dynamic PBR transit watcher design](../../../../docs/superpowers/specs/2026-04-06-dynamic-pbr-transit-watcher-design.md)
-- [Smoke testing runbook](../../../../docs/operations/smoke-testing.md)
-
-## Privilege Rationale
-
-The frr-sidecar must run as root with `NET_ADMIN`, `NET_RAW`, and `SYS_ADMIN`
-capabilities. All three are genuinely required:
-
-- **NET_ADMIN**: `pyroute2` in `transit_watcher.py` programs Policy-Based Routing
-  rules (`ip rule add/del`) and kernel routes (`ip route`) in the shared pod network
-  namespace. This requires `CAP_NET_ADMIN`. FRR daemons (zebra, ospfd) also need
-  `NET_ADMIN` to install routes they learn via OSPF.
-- **NET_RAW**: FRR binds raw sockets for OSPF hello/LSA packet processing.
-  Without `CAP_NET_RAW`, `ospfd` fails to open the OSPF multicast socket.
-- **SYS_ADMIN**: The transit watcher performs IPVS / netfilter operations and
-  may call into `clone`-based APIs. Without `CAP_SYS_ADMIN`, some `pyroute2`
-  operations fail on kernel versions that enforce the capability boundary.
-
-**Mitigation**: the chart's `securityContext.capabilities` section now drops
-`ALL` capabilities first (`drop: ["ALL"]`), then adds back only the three
-listed above. This follows the principle of least privilege: capabilities not
-explicitly required are removed at the kernel level, not merely omitted.
-
-**Periodic review**: as FRR and pyroute2 versions evolve, operators should
-review whether `SYS_ADMIN` remains necessary. A future refactor of the transit
-watcher to avoid the netfilter path could remove this capability.
-
-## Key Code Entry Points
-
-- [Transit watcher](transit_watcher.py)
-
-Read those documents for design history. This README documents the current
-runtime contract of the sidecar component.
+See [unit tests](../tests/pyunit/README.md) for local verification.

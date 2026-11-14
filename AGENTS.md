@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Security and contribution rules for garuda-frr-sidecar (FRR OSPF sidecar image + library chart).
+Security and contribution rules for frr-sidecar (FRR OSPF sidecar image + library chart).
 
 ## Security
 
@@ -27,31 +27,14 @@ The chart `version` in `charts/frr-sidecar/Chart.yaml` MUST equal the git tag
 (`vX.Y.Z` ↔ `X.Y.Z`). release-please manages version bumps.
 
 The image is injected by garuda's `MutatingAdmissionPolicy` (see platform rules above).
-The library chart remains published for backwards compatibility during the Phase 5
-cutover transition; it is no longer the primary consumption mechanism.
+The library chart remains published for backwards compatibility for existing consumers; it is no longer the primary consumption mechanism.
 
-## Image build obligations (this repo owns the implementation)
+## Runtime maintenance
 
-These are build-time obligations for maintainers of this image. Rationale is in the
-platform rules doc linked above.
+Follow the [organization coding rules](https://github.com/GFN-CIS/coding-agent-public-rules).
+The [runtime guide](image/README.md) is shared by maintainers and agents and
+links the deployed Python package. Keep `/readyz` separate from the
+loopback command bridge, and do not gate readiness on OSPF Full adjacency.
 
-- **`/readyz` on `0.0.0.0:9179`**: the image MUST expose this endpoint. HTTP 200 when
-  FRR is running and `vtysh` responds. HTTP 503 otherwise. The loopback-only `/health`
-  on `127.0.0.1:7890` is NOT a valid kubelet readinessProbe target — do not use it as a
-  replacement.
-- **`render_frr.py` at `/usr/lib/frr/render_frr.py`**: Python stdlib only (no Jinja2,
-  no `gomplate`, no `envsubst`). Reads env vars (`OSPF_INTERFACES`, `REDISTRIBUTE`,
-  `OSPF_ROUTER_ID`, `PROFILE`, `BACKBONE_IP`, `PBR_TRANSIT_TAG`,
-  `PBR_TRANSIT_INTERFACES`), CSV-splits list vars, and renders multi-line FRR blocks.
-- **Single toolchain — `python3`**: no `jq`, no `envsubst`, no shell substring hacks.
-  BACKBONE_IP extraction:
-  ```sh
-  BACKBONE_IP=$(ip -j addr show backbone | python3 -c \
-    'import json,sys; print(json.load(sys.stdin)[0]["addr_info"][0]["local"])')
-  ```
-  If `backbone` interface is absent at startup, the entrypoint MUST exit non-zero so
-  kubelet retries the container.
-- **SIGTERM handling**: entrypoint MUST trap SIGTERM, stop FRR daemons gracefully
-  (`killall watchfrr` or equivalent), and exit with code 0.
-- **Do NOT gate readiness on OSPF Full** — probe gates on FRR process liveness only.
-  See platform rules for rationale.
+Verify image changes against the package installed by `image/Dockerfile`.
+The old standalone scripts under `image/` are not the deployed entrypoints.
